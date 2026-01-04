@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  test-lint:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'postgres' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'postgres' }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'go_restful' }}
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd="pg_isready -U ${{ secrets.POSTGRES_USER || 'postgres' }} -d ${{ secrets.POSTGRES_DB || 'go_restful' }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go (from go.mod)
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download deps
+        run: go mod download
+
+      - name: Lint (golangci-lint)
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: SAST (gosec)
+        uses: securego/gosec@v2
+        with:
+          args: ./...
+
+      - name: Build
+        run: make build
+
+      - name: Test + DB migrate (CD-like DSN)
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'postgres' }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'postgres' }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'go_restful' }}
+          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY || 'ci-test-key' }}
+        shell: bash
+        run: |
+          set -e
+          PORT="${{ job.services.postgres.ports[5432] }}"
+          DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${PORT}/${POSTGRES_DB}?sslmode=disable"
+
+          export APP_DSN="$DSN"
+          export APP_JWT_SIGNING_KEY="$JWT_SIGNING_KEY"
+
+          make migrate
+          make test-cover
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage-all.out

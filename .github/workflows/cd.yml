@@ -1,0 +1,135 @@
+name: cd
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    name: Build & Push Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        shell: bash
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    needs: [docker]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.29.0"
+
+      - name: Configure kubeconfig
+        env:
+          KUBE_CONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+        run: |
+          set -e
+          mkdir -p ~/.kube
+          echo "$KUBE_CONFIG_B64" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Apply namespace
+        run: kubectl apply -f deploy/k8s/namespace.yml
+
+      - name: Apply Postgres secret
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+        run: |
+          set -e
+          kubectl -n go-rest create secret generic postgres-secret \
+            --from-literal=POSTGRES_USER="$POSTGRES_USER" \
+            --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --from-literal=POSTGRES_DB="$POSTGRES_DB" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Postgres manifests
+        run: |
+          set -e
+          kubectl apply -f deploy/k8s/postgres-service.yml
+          kubectl apply -f deploy/k8s/postgres-statefulset.yml
+
+      - name: Wait for Postgres
+        run: |
+          set -e
+          kubectl -n go-rest rollout status statefulset/postgres --timeout=180s
+          kubectl -n go-rest get pods -l app=postgres
+
+      - name: Apply app config secret
+        env:
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+        shell: bash
+        run: |
+          set -e
+          DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+
+          cat > /tmp/config.yml <<EOF
+          dsn: "${DSN}"
+          jwt_signing_key: "${JWT_SIGNING_KEY}"
+          EOF
+
+          kubectl -n go-rest create secret generic go-rest-api-config \
+            --from-file=config.yml=/tmp/config.yml \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply app manifests
+        run: |
+          set -e
+          kubectl apply -f deploy/k8s/deployment.yml
+          kubectl apply -f deploy/k8s/service.yml
+
+      - name: Rollout new image (api + initContainer)
+        shell: bash
+        run: |
+          set -e
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${{ github.sha }}"
+
+          # Update main container
+          kubectl -n go-rest set image deployment/go-rest-api api="$IMAGE"
+
+          # Update initContainer image as well (index 0 is 'migrate' in your manifest)
+          kubectl -n go-rest patch deployment go-rest-api --type='json' \
+            -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/initContainers/0/image\",\"value\":\"${IMAGE}\"}]"
+
+          kubectl -n go-rest rollout status deployment/go-rest-api --timeout=180s
