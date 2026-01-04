@@ -11,7 +11,7 @@ import (
 
 // Service encapsulates the authentication logic.
 type Service interface {
-	// authenticate authenticates a user using username and password.
+	// Login authenticate authenticates a user using username and password.
 	// It returns a JWT token if authentication succeeds. Otherwise, an error is returned.
 	Login(ctx context.Context, username, password string) (string, error)
 }
