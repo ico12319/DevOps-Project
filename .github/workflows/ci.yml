@@ -10,17 +10,23 @@ jobs:
   test-lint:
     runs-on: ubuntu-latest
 
+    env:
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+      JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+
     services:
       postgres:
         image: postgres:15-alpine
         env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'postgres' }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'postgres' }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'go_restful' }}
+          POSTGRES_USER: ${{ env.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.POSTGRES_DB }}
         ports:
           - 5432/tcp
         options: >-
-          --health-cmd="pg_isready -U ${{ secrets.POSTGRES_USER || 'postgres' }} -d ${{ secrets.POSTGRES_DB || 'go_restful' }}"
+          --health-cmd="pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -28,6 +34,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${POSTGRES_USER:?Missing secret POSTGRES_USER}"
+          : "${POSTGRES_PASSWORD:?Missing secret POSTGRES_PASSWORD}"
+          : "${POSTGRES_DB:?Missing secret POSTGRES_DB}"
+          : "${JWT_SIGNING_KEY:?Missing secret JWT_SIGNING_KEY}"
 
       - name: Setup Go (from go.mod)
         uses: actions/setup-go@v5
@@ -52,14 +67,9 @@ jobs:
         run: make build
 
       - name: Test + DB migrate (CD-like DSN)
-        env:
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'postgres' }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'postgres' }}
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'go_restful' }}
-          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY || 'ci-test-key' }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           PORT="${{ job.services.postgres.ports[5432] }}"
           DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${PORT}/${POSTGRES_DB}?sslmode=disable"
 
