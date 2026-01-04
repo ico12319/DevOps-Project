@@ -3,13 +3,17 @@ VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null 
 PACKAGES := $(shell go list ./... | grep -v /vendor/)
 LDFLAGS := -ldflags "-X main.Version=${VERSION}"
 
+# DSN is required only for DB-related targets (migrate/testdata), not for build/lint/etc.
 APP_DSN ?=
 
-ifeq ($(strip $(APP_DSN)),)
-$(error APP_DSN is required. Please set it in the environment or in the Makefile)
-endif
+# Fail only when DB targets are invoked (not on every make command)
+.PHONY: require-app-dsn
+require-app-dsn:
+	@test -n "$(APP_DSN)" || (echo "APP_DSN is required. Set APP_DSN env var."; exit 1)
 
-MIGRATE := docker run -v $(shell pwd)/migrations:/migrations --network host migrate/migrate:v4.10.0 -path=/migrations/ -database "$(APP_DSN)"
+# IMPORTANT: use '=' (recursive expansion) so APP_DSN is evaluated at runtime
+MIGRATE = docker run -v $(shell pwd)/migrations:/migrations --network host migrate/migrate:v4.10.0 \
+	-path=/migrations/ -database "$(APP_DSN)"
 
 PID_FILE := './.pid'
 FSWATCH_FILE := './fswatch.cfg'
@@ -45,12 +49,13 @@ run-restart: ## restart the API server
 	@go run ${LDFLAGS} cmd/server/main.go & echo $$! > $(PID_FILE)
 	@printf '%*s\n' "80" '' | tr ' ' -
 
+.PHONY: run-live
 run-live: ## run the API server with live reload support (requires fswatch)
 	@go run ${LDFLAGS} cmd/server/main.go & echo $$! > $(PID_FILE)
 	@fswatch -x -o --event Created --event Updated --event Renamed -r internal pkg cmd config | xargs -n1 -I {} make run-restart
 
 .PHONY: build
-build:  ## build the API server binary
+build: ## build the API server binary
 	CGO_ENABLED=0 go build ${LDFLAGS} -a -o server $(MODULE)/cmd/server
 
 .PHONY: build-docker
@@ -77,7 +82,7 @@ db-stop: ## stop the database server
 	docker stop postgres
 
 .PHONY: testdata
-testdata: ## populate the database with test data
+testdata: require-app-dsn ## populate the database with test data
 	make migrate-reset
 	@echo "Populating test data..."
 	@docker exec -it postgres psql "$(APP_DSN)" -f /testdata/testdata.sql
@@ -91,22 +96,22 @@ fmt: ## run "go fmt" on all Go packages
 	@go fmt $(PACKAGES)
 
 .PHONY: migrate
-migrate: ## run all new database migrations
+migrate: require-app-dsn ## run all new database migrations
 	@echo "Running all new database migrations..."
 	@$(MIGRATE) up
 
 .PHONY: migrate-down
-migrate-down: ## revert database to the last migration step
+migrate-down: require-app-dsn ## revert database to the last migration step
 	@echo "Reverting database to the last migration step..."
 	@$(MIGRATE) down 1
 
 .PHONY: migrate-new
-migrate-new: ## create a new database migration
+migrate-new: require-app-dsn ## create a new database migration
 	@read -p "Enter the name of the new migration: " name; \
 	$(MIGRATE) create -ext sql -dir /migrations/ $${name// /_}
 
 .PHONY: migrate-reset
-migrate-reset: ## reset database and re-run all migrations
+migrate-reset: require-app-dsn ## reset database and re-run all migrations
 	@echo "Resetting database..."
 	@$(MIGRATE) drop
 	@echo "Running all database migrations..."
