@@ -3,8 +3,12 @@ VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null 
 PACKAGES := $(shell go list ./... | grep -v /vendor/)
 LDFLAGS := -ldflags "-X main.Version=${VERSION}"
 
-CONFIG_FILE ?= ./config/local.yml
-APP_DSN ?= $(shell sed -n 's/^dsn:[[:space:]]*"\(.*\)"/\1/p' $(CONFIG_FILE))
+APP_DSN ?=
+
+ifeq ($(strip $(APP_DSN)),)
+$(error APP_DSN is required. Please set it in the environment or in the Makefile)
+endif
+
 MIGRATE := docker run -v $(shell pwd)/migrations:/migrations --network host migrate/migrate:v4.10.0 -path=/migrations/ -database "$(APP_DSN)"
 
 PID_FILE := './.pid'
