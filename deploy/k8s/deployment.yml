@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-rest-api
+  namespace: go-rest
+  labels:
+    app: go-rest-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-rest-api
+  template:
+    metadata:
+      labels:
+        app: go-rest-api
+    spec:
+      initContainers:
+        - name: migrate
+          image: ghcr.io/ico12319/devops-project:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              CFG=/etc/go-rest-api/config.yml
+              DSN="$(sed -n 's/^dsn:[[:space:]]*"\(.*\)".*/\1/p' "$CFG")"
+              echo "Running migrations..."
+              for i in $(seq 1 30); do
+                migrate -database "$DSN" -path ./migrations up && exit 0
+                echo "migrate failed, retry $i/30..."
+                sleep 2
+              done
+              exit 1
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/go-rest-api
+              readOnly: true
+
+      containers:
+        - name: api
+          image: ghcr.io/ico12319/devops-project:latest
+          imagePullPolicy: IfNotPresent
+          command: ["./server"]
+          args: ["-config", "/etc/go-rest-api/config.yml"]
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: app-config
+              mountPath: /etc/go-rest-api
+              readOnly: true
+
+      volumes:
+        - name: app-config
+          secret:
+            secretName: go-rest-api-config
+            items:
+              - key: config.yml
+                path: config.yml
