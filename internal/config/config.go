@@ -1,11 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/ico12319/devops-project/pkg/log"
 	"github.com/qiangxue/go-env"
 	"gopkg.in/yaml.v2"
+	"io"
 	"os"
+	"path/filepath"
 )
 
 const (
@@ -33,6 +36,31 @@ func (c Config) Validate() error {
 	)
 }
 
+// readFileScoped reads a file using os.Root (Go >= 1.24) to prevent path traversal.
+func readFileScoped(path string) ([]byte, error) {
+	clean := filepath.Clean(path)
+
+	dir := filepath.Dir(clean)
+	base := filepath.Base(clean)
+	if base == "." || base == string(os.PathSeparator) {
+		return nil, fmt.Errorf("invalid config file path: %q", path)
+	}
+
+	root, err := os.OpenRoot(dir) // Go 1.24+
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+
+	f, err := root.Open(base)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	return io.ReadAll(f)
+}
+
 // Load returns an application configuration which is populated from the given configuration file and environment variables.
 func Load(file string, logger log.Logger) (*Config, error) {
 	// default config
@@ -42,7 +70,7 @@ func Load(file string, logger log.Logger) (*Config, error) {
 	}
 
 	// load from YAML config file
-	bytes, err := os.ReadFile(file)
+	bytes, err := readFileScoped(file)
 	if err != nil {
 		return nil, err
 	}

@@ -132,6 +132,7 @@ func (p *Pages) BuildLinks(baseURL string, defaultPerPage int) [4]string {
 		links[2] = fmt.Sprintf("%v%v=%v", baseURL, PageVar, page+1)
 		links[3] = fmt.Sprintf("%v%v=%v", baseURL, PageVar, pageCount)
 	} else if pageCount < 0 {
+		// #nosec G602 -- links is a fixed-size array [4]string; index 2 is always in range
 		links[2] = fmt.Sprintf("%v%v=%v", baseURL, PageVar, page+1)
 	}
 	if perPage := p.PerPage; perPage != defaultPerPage {
