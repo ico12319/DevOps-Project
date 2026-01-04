@@ -5,7 +5,7 @@ import (
 	"github.com/ico12319/devops-project/pkg/log"
 	"github.com/qiangxue/go-env"
 	"gopkg.in/yaml.v2"
-	"io/ioutil"
+	"os"
 )
 
 const (
@@ -42,7 +42,7 @@ func Load(file string, logger log.Logger) (*Config, error) {
 	}
 
 	// load from YAML config file
-	bytes, err := ioutil.ReadFile(file)
+	bytes, err := os.ReadFile(file)
 	if err != nil {
 		return nil, err
 	}

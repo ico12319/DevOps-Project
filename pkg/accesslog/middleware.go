@@ -26,7 +26,7 @@ func Handler(logger log.Logger) routing.Handler {
 		err := c.Next()
 
 		// generate an access log message
-		logger.With(ctx, "duration", time.Now().Sub(start).Milliseconds(), "status", rw.Status).
+		logger.With(ctx, "duration", time.Since(start).Milliseconds(), "status", rw.Status).
 			Infof("%s %s %s %d %d", c.Request.Method, c.Request.URL.Path, c.Request.Proto, rw.Status, rw.BytesWritten)
 
 		return err
