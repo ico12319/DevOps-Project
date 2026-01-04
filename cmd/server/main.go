@@ -57,8 +57,9 @@ func main() {
 	// build HTTP server
 	address := fmt.Sprintf(":%v", cfg.ServerPort)
 	hs := &http.Server{
-		Addr:    address,
-		Handler: buildHandler(logger, dbcontext.New(db), cfg),
+		Addr:              address,
+		Handler:           buildHandler(logger, dbcontext.New(db), cfg),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	// start the HTTP server with graceful shutdown
