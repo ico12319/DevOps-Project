@@ -59,7 +59,7 @@ jobs:
           version: latest
 
       - name: SAST (gosec)
-        uses: securego/gosec@v2
+        uses: securego/gosec@v2.22.11
         with:
           args: ./...
 
