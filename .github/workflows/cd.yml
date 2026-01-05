@@ -18,10 +18,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set image name
+      - name: Compute image base (lowercase)
         shell: bash
         run: |
-          echo "IMAGE=ghcr.io/${{ toLower(github.repository) }}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          REPO_LC="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE_BASE=ghcr.io/${REPO_LC}" >> "$GITHUB_ENV"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -39,8 +41,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE }}:${{ github.sha }}
-            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE_BASE }}:${{ github.sha }}
+            ${{ env.IMAGE_BASE }}:latest
 
   deploy:
     name: Deploy to Kubernetes (k3d local)
@@ -52,10 +54,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Compute image (lowercase) for deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO_LC="$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=ghcr.io/${REPO_LC}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
       - name: Show kubectl context (debug)
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           kubectl version --client=true
           kubectl config get-contexts
           kubectl config use-context k3d-k3s-default
@@ -71,8 +80,7 @@ jobs:
       - name: Pull image + import into k3d
         shell: bash
         run: |
-          set -e
-          IMAGE="ghcr.io/${{ toLower(github.repository) }}:${{ github.sha }}"
+          set -euo pipefail
           docker pull "$IMAGE"
           k3d image import "$IMAGE" -c k3s-default
 
@@ -86,7 +94,7 @@ jobs:
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           kubectl -n go-rest create secret generic postgres-secret \
             --from-literal=POSTGRES_USER="$POSTGRES_USER" \
             --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
@@ -96,14 +104,14 @@ jobs:
       - name: Apply Postgres manifests
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           kubectl apply -f deploy/k8s/postgres-service.yml
           kubectl apply -f deploy/k8s/postgres-statefulset.yml
 
       - name: Wait for Postgres
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           kubectl -n go-rest rollout status statefulset/postgres --timeout=180s
           kubectl -n go-rest get pods -l app=postgres
 
@@ -115,7 +123,7 @@ jobs:
           JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           DSN="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
 
           cat > /tmp/config.yml <<EOF
@@ -130,15 +138,14 @@ jobs:
       - name: Apply app manifests
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           kubectl apply -f deploy/k8s/deployment.yml
           kubectl apply -f deploy/k8s/service.yml
 
       - name: Rollout new image (api + initContainer)
         shell: bash
         run: |
-          set -e
-          IMAGE="ghcr.io/${{ toLower(github.repository) }}:${{ github.sha }}"
+          set -euo pipefail
 
           kubectl -n go-rest set image deployment/go-rest-api api="$IMAGE"
 
