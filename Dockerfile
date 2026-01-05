@@ -1,20 +1,30 @@
-FROM golang:alpine AS build
+FROM --platform=$BUILDPLATFORM golang:alpine AS build
 RUN apk add --no-cache git bash make ca-certificates curl tar
 WORKDIR /app
 
-ARG MIGRATE_VERSION=4.7.1
-ADD https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/migrate.linux-amd64.tar.gz /tmp/migrate.tar.gz
-RUN tar -xzf /tmp/migrate.tar.gz -C /usr/local/bin \
-  && mv /usr/local/bin/migrate.linux-amd64 /usr/local/bin/migrate \
-  && chmod +x /usr/local/bin/migrate
+ARG TARGETOS
+ARG TARGETARCH
+
+ARG MIGRATE_VERSION=4.19.1
+RUN set -eux; \
+  FILE="migrate.${TARGETOS}-${TARGETARCH}.tar.gz"; \
+  curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/${FILE}" -o /tmp/migrate.tar.gz; \
+  tar -xzf /tmp/migrate.tar.gz -C /usr/local/bin; \
+  mv "/usr/local/bin/migrate.${TARGETOS}-${TARGETARCH}" /usr/local/bin/migrate; \
+  chmod +x /usr/local/bin/migrate; \
+  migrate -version
 
 COPY go.* ./
-RUN go mod download && go mod verify
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download && go mod verify
 
 COPY . .
-RUN make build
 
-FROM alpine:latest
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH make build
+
+FROM --platform=$TARGETPLATFORM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 
