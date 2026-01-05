@@ -6,17 +6,18 @@ ARG TARGETOS
 ARG TARGETARCH
 
 ARG MIGRATE_VERSION=4.19.1
+
 RUN set -eux; \
   FILE="migrate.${TARGETOS}-${TARGETARCH}.tar.gz"; \
   curl -fsSL "https://github.com/golang-migrate/migrate/releases/download/v${MIGRATE_VERSION}/${FILE}" -o /tmp/migrate.tar.gz; \
   tar -xzf /tmp/migrate.tar.gz -C /usr/local/bin; \
   mv "/usr/local/bin/migrate.${TARGETOS}-${TARGETARCH}" /usr/local/bin/migrate; \
   chmod +x /usr/local/bin/migrate; \
-  migrate -version
+  ls -la /usr/local/bin | grep migrate
 
 COPY go.* ./
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download && go mod verify
+  go mod download && go mod verify
 
 COPY . .
 
