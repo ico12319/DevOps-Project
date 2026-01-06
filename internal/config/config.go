@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/ico12319/devops-project/pkg/log"
@@ -69,24 +70,32 @@ func Load(file string, logger log.Logger) (*Config, error) {
 		JWTExpiration: defaultJWTExpirationHours,
 	}
 
-	// load from YAML config file
-	bytes, err := readFileScoped(file)
-	if err != nil {
-		return nil, err
-	}
-	if err = yaml.Unmarshal(bytes, &c); err != nil {
-		return nil, err
+	// load from YAML config file (optional)
+	if file != "" {
+		bytes, err := readFileScoped(file)
+		if err != nil {
+			// If the file doesn't exist, ignore and rely on env.
+			if errors.Is(err, os.ErrNotExist) {
+				// continue
+			} else {
+				return nil, err
+			}
+		} else {
+			if err := yaml.Unmarshal(bytes, &c); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// load from environment variables prefixed with "APP_"
-	if err = env.New("APP_", logger.Infof).Load(&c); err != nil {
+	if err := env.New("APP_", logger.Infof).Load(&c); err != nil {
 		return nil, err
 	}
 
 	// validation
-	if err = c.Validate(); err != nil {
+	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 
-	return &c, err
+	return &c, nil
 }

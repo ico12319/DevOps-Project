@@ -36,7 +36,7 @@ func Test_getCorrelationID(t *testing.T) {
 	req, _ := http.NewRequest("GET", "http://example.com", bytes.NewBufferString(""))
 	assert.Empty(t, getCorrelationID(req))
 	req.Header.Set("X-Correlation-ID", "test")
-	assert.Equal(t, "test", getCorrelationID(nil))
+	assert.Equal(t, "test", getCorrelationID(req))
 }
 
 func Test_getRequestID(t *testing.T) {
