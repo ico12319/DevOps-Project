@@ -1,8 +1,13 @@
+# Use bash for all recipes (GitHub runners + many systems default /bin/sh = dash, no pipefail)
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -euo pipefail -c
+
 MODULE = $(shell go list -m)
 VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null || echo "1.0.0")
 PACKAGES := $(shell go list ./... | grep -v /vendor/)
 LDFLAGS := -ldflags "-X main.Version=${VERSION}"
 
+# DSN is required only for DB-related targets (migrate/testdata), not for build/lint/etc.
 APP_DSN ?=
 
 PID_FILE := './.pid'
@@ -25,18 +30,19 @@ default: help
 # generate help info from comments: thanks to https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
 .PHONY: help
 help: ## help information about make commands
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: test
 test: ## run unit tests (fails properly on test failure) and aggregate coverage
-	@set -euo pipefail; \
-	echo "mode: count" > coverage-all.out; \
-	for pkg in $(PACKAGES); do \
+	@echo "mode: count" > coverage-all.out
+	@rm -f coverage.out
+	@for pkg in $(PACKAGES); do \
 		echo "==> testing $$pkg"; \
 		go test -p=1 -cover -covermode=count -coverprofile=coverage.out "$$pkg"; \
 		tail -n +2 coverage.out >> coverage-all.out; \
-	done; \
-	rm -f coverage.out
+	done
+	@rm -f coverage.out
 
 .PHONY: test-cover
 test-cover: test ## run unit tests and print coverage summary (CI-friendly)
@@ -52,7 +58,7 @@ run: ## run the API server
 
 .PHONY: run-restart
 run-restart: ## restart the API server
-	@pkill -P `cat $(PID_FILE)` || true
+	@pkill -P "$$(cat $(PID_FILE) 2>/dev/null)" || true
 	@printf '%*s\n' "80" '' | tr ' ' -
 	@echo "Source file changed. Restarting server..."
 	@go run ${LDFLAGS} cmd/server/main.go & echo $$! > $(PID_FILE)
@@ -61,7 +67,8 @@ run-restart: ## restart the API server
 .PHONY: run-live
 run-live: ## run the API server with live reload support (requires fswatch)
 	@go run ${LDFLAGS} cmd/server/main.go & echo $$! > $(PID_FILE)
-	@fswatch -x -o --event Created --event Updated --event Renamed -r internal pkg cmd config | xargs -n1 -I {} make run-restart
+	@fswatch -x -o --event Created --event Updated --event Renamed -r internal pkg cmd config | \
+		xargs -n1 -I {} make run-restart
 
 .PHONY: build
 build: ## build the API server binary
