@@ -6,8 +6,6 @@ import (
 	"github.com/ico12319/devops-project/pkg/dbcontext"
 	"github.com/ico12319/devops-project/pkg/log"
 	_ "github.com/lib/pq" // initialize posgresql for test
-	"path"
-	"runtime"
 	"testing"
 )
 
@@ -47,10 +45,4 @@ func ResetTables(t *testing.T, db *dbcontext.DB, tables ...string) {
 			t.FailNow()
 		}
 	}
-}
-
-// getSourcePath returns the directory containing the source code that is calling this function.
-func getSourcePath() string {
-	_, filename, _, _ := runtime.Caller(1)
-	return path.Dir(filename)
 }
