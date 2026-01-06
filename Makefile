@@ -3,20 +3,21 @@ VERSION ?= $(shell git describe --tags --always --dirty --match=v* 2> /dev/null 
 PACKAGES := $(shell go list ./... | grep -v /vendor/)
 LDFLAGS := -ldflags "-X main.Version=${VERSION}"
 
-# DSN is required only for DB-related targets (migrate/testdata), not for build/lint/etc.
 APP_DSN ?=
 
-# Fail only when DB targets are invoked (not on every make command)
+PID_FILE := './.pid'
+FSWATCH_FILE := './fswatch.cfg'
+
 .PHONY: require-app-dsn
 require-app-dsn:
 	@test -n "$(APP_DSN)" || (echo "APP_DSN is required. Set APP_DSN env var."; exit 1)
 
 # IMPORTANT: use '=' (recursive expansion) so APP_DSN is evaluated at runtime
-MIGRATE = docker run -v $(shell pwd)/migrations:/migrations --network host migrate/migrate:v4.10.0 \
+MIGRATE = docker run --rm \
+	-v $(shell pwd)/migrations:/migrations \
+	--network host \
+	migrate/migrate:v4.19.1 \
 	-path=/migrations/ -database "$(APP_DSN)"
-
-PID_FILE := './.pid'
-FSWATCH_FILE := './fswatch.cfg'
 
 .PHONY: default
 default: help
@@ -27,15 +28,23 @@ help: ## help information about make commands
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: test
-test: ## run unit tests
-	@echo "mode: count" > coverage-all.out
-	@$(foreach pkg,$(PACKAGES), \
-		go test -p=1 -cover -covermode=count -coverprofile=coverage.out ${pkg}; \
-		tail -n +2 coverage.out >> coverage-all.out;)
+test: ## run unit tests (fails properly on test failure) and aggregate coverage
+	@set -euo pipefail; \
+	echo "mode: count" > coverage-all.out; \
+	for pkg in $(PACKAGES); do \
+		echo "==> testing $$pkg"; \
+		go test -p=1 -cover -covermode=count -coverprofile=coverage.out "$$pkg"; \
+		tail -n +2 coverage.out >> coverage-all.out; \
+	done; \
+	rm -f coverage.out
 
 .PHONY: test-cover
-test-cover: test ## run unit tests and show test coverage information
-	go tool cover -html=coverage-all.out
+test-cover: test ## run unit tests and print coverage summary (CI-friendly)
+	@go tool cover -func=coverage-all.out | tail -n 1
+
+.PHONY: cover-html
+cover-html: test ## open HTML coverage report locally
+	@go tool cover -html=coverage-all.out
 
 .PHONY: run
 run: ## run the API server
@@ -83,12 +92,12 @@ db-stop: ## stop the database server
 
 .PHONY: testdata
 testdata: require-app-dsn ## populate the database with test data
-	make migrate-reset
+	@$(MAKE) migrate-reset
 	@echo "Populating test data..."
 	@docker exec -it postgres psql "$(APP_DSN)" -f /testdata/testdata.sql
 
 .PHONY: lint
-lint: ## run golint on all Go package
+lint: ## run golint on all Go packages
 	@golint $(PACKAGES)
 
 .PHONY: fmt
