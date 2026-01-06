@@ -16,8 +16,23 @@ spec:
         app: go-rest-api
     spec:
       initContainers:
-        - name: migrate
+        - name: copy-migrations
           image: ghcr.io/ico12319/devops-project:latest
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              echo "Copying migrations into shared volume..."
+              mkdir -p /migrations
+              cp -R /app/migrations/. /migrations/
+              ls -la /migrations | head -n 50
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+
+        - name: migrate
+          image: migrate/migrate:v4.19.1
           imagePullPolicy: IfNotPresent
           command: ["sh", "-c"]
           args:
@@ -25,9 +40,10 @@ spec:
               set -e
               CFG=/etc/go-rest-api/config.yml
               DSN="$(sed -n 's/^dsn:[[:space:]]*"\(.*\)".*/\1/p' "$CFG")"
+
               echo "Running migrations..."
               for i in $(seq 1 30); do
-                migrate -database "$DSN" -path ./migrations up && exit 0
+                migrate -database "$DSN" -path /migrations up && exit 0
                 echo "migrate failed, retry $i/30..."
                 sleep 2
               done
@@ -36,6 +52,8 @@ spec:
             - name: app-config
               mountPath: /etc/go-rest-api
               readOnly: true
+            - name: migrations
+              mountPath: /migrations
 
       containers:
         - name: api
@@ -57,3 +75,6 @@ spec:
             items:
               - key: config.yml
                 path: config.yml
+
+        - name: migrations
+          emptyDir: {}
