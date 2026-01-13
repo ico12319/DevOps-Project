@@ -2,6 +2,7 @@ package album
 
 import (
 	"context"
+	"fmt"
 	"github.com/ico12319/devops-project/internal/entity"
 	"github.com/ico12319/devops-project/pkg/dbcontext"
 	"github.com/ico12319/devops-project/pkg/log"
@@ -56,6 +57,8 @@ func (r repository) Update(ctx context.Context, album entity.Album) error {
 func (r repository) Delete(ctx context.Context, id string) error {
 	album, err := r.Get(ctx, id)
 	if err != nil {
+		r.logger.Error(fmt.Sprintf("failed to delete album with id %s error %s", id, err.Error()))
+
 		return err
 	}
 	return r.db.With(ctx).Model(&album).Delete()
